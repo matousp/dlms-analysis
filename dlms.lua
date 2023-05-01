@@ -209,9 +209,10 @@ local DataAccessResult = ProtoField.uint8("dlms.dataAccessResult","DataAccessRes
 dlms_proto.fields = {DLMS, APDU_type, GetRequest, SetRequest, Request_invoke_id, Class_id, Instance_id, Attribute_id, Access_selection, Block_number, GetResponse, SetResponse, Response_invoke_id, Response_result, Response_getData, DataType, DataStringLen, StringValue, LongValue, BooleanValue, IntegerValue, DoubleLongValue, Long64Value, StructureValue, LastBlock, BlockNumber, DataBlockResult, DataAccessResult}
 
 function data_dissector(buffer, t_dataTree, offset, dataLen)
-	-- if(offset+1 > dataLen) then
-	-- 	return offset
-	-- end
+	if(offset-4 > dataLen) then
+		t_dataTree:add(DataType,-1)
+		return offset
+	end
 
 	local t_data = t_dataTree:add(DataType,buffer(offset+1,1))
 	local dataTypeIndex = buffer(offset+1,1):uint()
@@ -294,117 +295,117 @@ function dlms_proto.dissector(buffer, pinfo, tree)
 	local frame_len = 0
 	local dlms_type = buffer(offset,1):uint()
 
-		-- create the DLMS protocol tree item
-		t_dlms:add(APDU_type, buffer(offset,1))
-		frame_len = buffer:len()
-		pinfo.cols['info'] = "DLMS "..COSEMpdu[dlms_type]
+	-- create the DLMS protocol tree item
+	t_dlms:add(APDU_type, buffer(offset,1))
+	frame_len = buffer:len()
+	pinfo.cols['info'] = "DLMS "..COSEMpdu[dlms_type]
 
-		-- processing DLMS.GetRequest
-		if dlms_type == 0xc0 then
-			local getRequestType = buffer(offset+1,1):uint()
-			t_dlms:add(GetRequest, buffer(offset+1,1))
-			
-			if getRequestType == 1 then -- getRequestNormal
-				t_dlms:add(Request_invoke_id, buffer(offset+2,1))
-				local t_Descriptor = t_dlms:add(buffer(offset+3),"Cosem-Attribute-Descriptor")
-				local class = buffer(offset+3,2):uint()
-				local instance = buffer(offset+5,6)
-				local obis = string.format("%d.%d.%d.%d.%d.%d",instance(0,1):uint(),instance(1,1):uint(),instance(2,1):uint(),instance(3,1):uint(),instance(4,1):uint(),instance(5,1):uint())
-				local attribute = buffer(offset+11,1):uint()
-				
-				t_Descriptor:add(Class_id, buffer(offset+3,2))
-				t_Descriptor:add(Instance_id, buffer(offset+5,6),obis)
-				t_Descriptor:add(Attribute_id, buffer(offset+11,1))
-				
-				t_dlms:add(Access_selection, buffer(offset+12,1))
-				pinfo.cols['info'] = GetRequestVALS[getRequestType]..", class="..class..", OBIS="..obis..", attr="..attribute
-			elseif getRequestType == 2 then -- getRequestNext
-				t_dlms:add(Request_invoke_id, buffer(offset+2,1))
-				t_dlms:add(Block_number, buffer(offset+3,4))
-				local block_number = buffer(offset+3,4):uint()
-				
-				pinfo.cols['info'] = GetRequestVALS[getRequestType]..", block no: "..block_number
-			else
-				pinfo.cols['info'] = GetRequestVALS[getRequestType]
-			end
-		end
-
-		-- processing DLMS.SetRequest
-		if dlms_type == 0xc1 then
-			local setRequestType = buffer(offset+1,1):uint()
-			t_dlms:add(SetRequest,buffer(offset+1,1))
-			
-			if setRequestType == 1 then -- setRequestNormal
-				t_dlms:add(Request_invoke_id,buffer(offset+2,1))
-				local t_Descriptor = t_dlms:add(buffer(offset+3),"Cosem-Attribute-Descriptor")
-				local class = buffer(offset+3,2):uint()
-				local instance = buffer(offset+5,6)
-				local obis = string.format("%d.%d.%d.%d.%d.%d",instance(0,1):uint(),instance(1,1):uint(),instance(2,1):uint(),instance(3,1):uint(),instance(4,1):uint(),instance(5,1):uint())
-				local attribute = buffer(offset+11,1):uint()
-				
-				t_Descriptor:add(Class_id, buffer(offset+3,2))
-				t_Descriptor:add(Instance_id, buffer(offset+5,6),obis)
-				t_Descriptor:add(Attribute_id, buffer(offset+11,1))
-				t_dlms:add(Access_selection, buffer(offset+12,1))
-				offset = offset + 13
-				local dataLen = frame_len - 13
-				local t_data = t_dlms:add(buffer(offset,dataLen),"Data")
-				local dataTypeIndex = buffer(offset,1):uint()
-				local value
-				t_data:add(DataType,buffer(offset,1))
-
-				-- processing long integer or long unsigned (16 bits)
-				if dataTypeIndex == 16 or dataTypeIndex == 18 then 
-					t_data:add(LongValue,buffer(offset+1,dataLen-1))
-					value = buffer(offset+1,dataLen-1):uint()
-				end
-
-				-- processing Boolean (8 bits)
-				if dataTypeIndex == 3 then
-					t_data:add(BooleanValue, buffer(offset+1,dataLen-1))
-					value = buffer(offset+1,dataLen-1):uint()
-				end
-				
-				-- processing double long and double long unsigned (32 bits)
-				if dataTypeIndex == 5 or dataTypeIndex == 6 then
-					t_data:add(DoubleLongValue, buffer(offset+1,dataLen-1))
-					value = buffer(offset+1,dataLen-1):uint()
-				end
-
-				-- processing structure and array (sequence of data)
-				if dataTypeIndex == 1 or dataTypeIndex == 2 then
-					t_data:add(StringValue,buffer(offset+1,dataLen-1))
-					value = buffer(offset+1,dataLen-1):uint()
-				end
-
-				-- processing unsigned integer, integer or enum (8 bits)
-				if dataTypeIndex == 17 or dataTypeIndex == 15  or dataTypeIndex == 22 then
-					t_data:add(IntegerValue, buffer(offset+1,dataLen-1))
-					value = buffer(offset+1,dataLen-1):uint()
-				end
-
-				-- processing octet string or visible string
-				if dataTypeIndex == 9 or dataTypeIndex == 10 then
-					t_data:add(DataStringLen,buffer(offset+1,1))
-					-- get dataLen from the OCTET STRING format
-					dataLen = buffer(offset+2,1):uint()
-					t_data:add(StringValue,buffer(offset+3,dataLen))
-					value = buffer(offset+3,dataLen)
-				end
-				pinfo.cols['info'] = SetRequestVALS[setRequestType]..", OBIS="..obis..", attr="..attribute..", value="..value
-			end 
-		end
+	-- processing DLMS.GetRequest
+	if dlms_type == 0xc0 then
+		local getRequestType = buffer(offset+1,1):uint()
+		t_dlms:add(GetRequest, buffer(offset+1,1))
 		
-		-- processing DLMS.GetResponse
-		if dlms_type == 0xc4 then
-			t_dlms:add(GetResponse,buffer(offset+1,1))
+		if getRequestType == 1 then -- getRequestNormal
+			t_dlms:add(Request_invoke_id, buffer(offset+2,1))
+			local t_Descriptor = t_dlms:add(buffer(offset+3),"Cosem-Attribute-Descriptor")
+			local class = buffer(offset+3,2):uint()
+			local instance = buffer(offset+5,6)
+			local obis = string.format("%d.%d.%d.%d.%d.%d",instance(0,1):uint(),instance(1,1):uint(),instance(2,1):uint(),instance(3,1):uint(),instance(4,1):uint(),instance(5,1):uint())
+			local attribute = buffer(offset+11,1):uint()
+			
+			t_Descriptor:add(Class_id, buffer(offset+3,2))
+			t_Descriptor:add(Instance_id, buffer(offset+5,6),obis)
+			t_Descriptor:add(Attribute_id, buffer(offset+11,1))
+			
+			t_dlms:add(Access_selection, buffer(offset+12,1))
+			pinfo.cols['info'] = GetRequestVALS[getRequestType]..", class="..class..", OBIS="..obis..", attr="..attribute
+		elseif getRequestType == 2 then -- getRequestNext
+			t_dlms:add(Request_invoke_id, buffer(offset+2,1))
+			t_dlms:add(Block_number, buffer(offset+3,4))
+			local block_number = buffer(offset+3,4):uint()
+			
+			pinfo.cols['info'] = GetRequestVALS[getRequestType]..", block no: "..block_number
+		else
+			pinfo.cols['info'] = GetRequestVALS[getRequestType]
+		end
+	end
 
-			local responseType = buffer(offset+1,1):uint()
-			local dataLen = frame_len-5
-			local dataTypeIndex = 0
-			t_dlms:add(Response_invoke_id,buffer(offset+2,1))
+	-- processing DLMS.SetRequest
+	if dlms_type == 0xc1 then
+		local setRequestType = buffer(offset+1,1):uint()
+		t_dlms:add(SetRequest,buffer(offset+1,1))
+		
+		if setRequestType == 1 then -- setRequestNormal
+			t_dlms:add(Request_invoke_id,buffer(offset+2,1))
+			local t_Descriptor = t_dlms:add(buffer(offset+3),"Cosem-Attribute-Descriptor")
+			local class = buffer(offset+3,2):uint()
+			local instance = buffer(offset+5,6)
+			local obis = string.format("%d.%d.%d.%d.%d.%d",instance(0,1):uint(),instance(1,1):uint(),instance(2,1):uint(),instance(3,1):uint(),instance(4,1):uint(),instance(5,1):uint())
+			local attribute = buffer(offset+11,1):uint()
+			
+			t_Descriptor:add(Class_id, buffer(offset+3,2))
+			t_Descriptor:add(Instance_id, buffer(offset+5,6),obis)
+			t_Descriptor:add(Attribute_id, buffer(offset+11,1))
+			t_dlms:add(Access_selection, buffer(offset+12,1))
+			offset = offset + 13
+			local dataLen = frame_len - 13
+			local t_data = t_dlms:add(buffer(offset,dataLen),"Data")
+			local dataTypeIndex = buffer(offset,1):uint()
+			local value
+			t_data:add(DataType,buffer(offset,1))
 
-			if responseType == 1 then -- GetNormalResponse
+			-- processing long integer or long unsigned (16 bits)
+			if dataTypeIndex == 16 or dataTypeIndex == 18 then 
+				t_data:add(LongValue,buffer(offset+1,dataLen-1))
+				value = buffer(offset+1,dataLen-1):uint()
+			end
+
+			-- processing Boolean (8 bits)
+			if dataTypeIndex == 3 then
+				t_data:add(BooleanValue, buffer(offset+1,dataLen-1))
+				value = buffer(offset+1,dataLen-1):uint()
+			end
+			
+			-- processing double long and double long unsigned (32 bits)
+			if dataTypeIndex == 5 or dataTypeIndex == 6 then
+				t_data:add(DoubleLongValue, buffer(offset+1,dataLen-1))
+				value = buffer(offset+1,dataLen-1):uint()
+			end
+
+			-- processing structure and array (sequence of data)
+			if dataTypeIndex == 1 or dataTypeIndex == 2 then
+				t_data:add(StringValue,buffer(offset+1,dataLen-1))
+				value = buffer(offset+1,dataLen-1):uint()
+			end
+
+			-- processing unsigned integer, integer or enum (8 bits)
+			if dataTypeIndex == 17 or dataTypeIndex == 15  or dataTypeIndex == 22 then
+				t_data:add(IntegerValue, buffer(offset+1,dataLen-1))
+				value = buffer(offset+1,dataLen-1):uint()
+			end
+
+			-- processing octet string or visible string
+			if dataTypeIndex == 9 or dataTypeIndex == 10 then
+				t_data:add(DataStringLen,buffer(offset+1,1))
+				-- get dataLen from the OCTET STRING format
+				dataLen = buffer(offset+2,1):uint()
+				t_data:add(StringValue,buffer(offset+3,dataLen))
+				value = buffer(offset+3,dataLen)
+			end
+			pinfo.cols['info'] = SetRequestVALS[setRequestType]..", OBIS="..obis..", attr="..attribute..", value="..value
+		end 
+	end
+
+	-- processing DLMS.GetResponse
+	if dlms_type == 0xc4 then
+		t_dlms:add(GetResponse,buffer(offset+1,1))
+
+		local responseType = buffer(offset+1,1):uint()
+		local dataLen = frame_len-5
+		local dataTypeIndex = 0
+		t_dlms:add(Response_invoke_id,buffer(offset+2,1))
+
+		if responseType == 1 then -- GetNormalResponse
 			local t_data = t_dlms:add(buffer(offset+3,frame_len-3),"Data")
 			offset = offset+3
 			t_data:add(Response_getData,buffer(offset,1))
@@ -419,7 +420,7 @@ function dlms_proto.dissector(buffer, pinfo, tree)
 				pinfo.cols['info'] = GetResponseVALS[responseType]..", "..DataAccessResultVALS[result].." ("..dataLen.." bytes)"
 			end
 		end
-			
+		
 		if responseType == 2 then -- GetResponseWithDatablock
 			local t_dataBlock = t_dlms:add(buffer(offset+3, frame_len-3),"DataBlock-G")
 			offset = offset+3
@@ -442,48 +443,52 @@ function dlms_proto.dissector(buffer, pinfo, tree)
 					local LenBytes = dataBlockLen - 128  -- get the length of the length field
 					local LenValue = buffer(offset+1,LenBytes):uint()
 					t_dataBlock:add(DataStringLen, buffer(offset,LenBytes+1), LenValue)
-					offset = offset + LenBytes + 1		-- Himanshu
+					offset = offset + LenBytes + 1		-- Himanshu - added "+ 1"
 				end
 		
-				t_dataBlock:add(StringValue,buffer(offset,dataLen-1-1)) 		-- Himanshu
+				if buffer(offset,1):uint() == 1 or buffer(offset,1):uint() == 2 then
+					data_dissector(buffer, t_dataBlock, offset-1, dataLen-1)
+				else
+					t_dataBlock:add(StringValue,buffer(offset,dataLen-1 - 1)) 		-- Himanshu - added "- 1"
+				end
 			end
-				pinfo.cols['info'] = GetResponseVALS[responseType].." no. "..blockNumber..", "..GetDataTypeVALS[dataTypeIndex].." ("..dataLen.." bytes)"
-			else
-				pinfo.cols['info'] = GetResponseVALS[responseType]..", "..GetDataTypeVALS[dataTypeIndex].." ("..dataLen.." bytes)"
-			end
+			pinfo.cols['info'] = GetResponseVALS[responseType].." no. "..blockNumber..", "..GetDataTypeVALS[dataTypeIndex].." ("..dataLen.." bytes)"
+		else
+			pinfo.cols['info'] = GetResponseVALS[responseType]..", "..GetDataTypeVALS[dataTypeIndex].." ("..dataLen.." bytes)"
 		end
+	end
 
-		-- processing DLMS.SetResponse
-		if dlms_type == 0xc5 then
-			t_dlms:add(SetResponse,buffer(offset+1,1))
+	-- processing DLMS.SetResponse
+	if dlms_type == 0xc5 then
+		t_dlms:add(SetResponse,buffer(offset+1,1))
 
-			local responseType = buffer(offset+1,1):uint()
-			t_dlms:add(Response_invoke_id,buffer(offset+2,1))
+		local responseType = buffer(offset+1,1):uint()
+		t_dlms:add(Response_invoke_id,buffer(offset+2,1))
 
-			if responseType == 1 then -- SetNormalResponse
-			t_dlms:add(DataAccessResult, buffer(offset+3,1))
-			local response = buffer(offset+3,1):uint()
-			pinfo.cols['info'] = SetResponseVALS[responseType]..", result="..response.." ("..DataAccessResultVALS[response]..")"
-			end
+		if responseType == 1 then -- SetNormalResponse
+		t_dlms:add(DataAccessResult, buffer(offset+3,1))
+		local response = buffer(offset+3,1):uint()
+		pinfo.cols['info'] = SetResponseVALS[responseType]..", result="..response.." ("..DataAccessResultVALS[response]..")"
 		end
+	end
 		
-		-- processing DLMS.AARQ (encoded by BER using TLV structures)
-		if dlms_type == 0x60 then									-- type (application tag AARQ)
-			local bufferLen = buffer(offset+1,1):uint()  -- the length of the TLV value
-			t_dlms:add(buffer(offset+1,1),"Length:",bufferLen)
-			local type = GetTagNumber(buffer:range(2,1)) -- type (AARQ field)
-			local len = buffer(offset+3,1):uint()				-- the length of the embedded TLV
-			bufferLen = bufferLen - len -2
-			offset = offset + 4
-			if type == 1 then -- type Application Context
+	-- processing DLMS.AARQ (encoded by BER using TLV structures)
+	if dlms_type == 0x60 then									-- type (application tag AARQ)
+		local bufferLen = buffer(offset+1,1):uint()  -- the length of the TLV value
+		t_dlms:add(buffer(offset+1,1),"Length:",bufferLen)
+		local type = GetTagNumber(buffer:range(2,1)) -- type (AARQ field)
+		local len = buffer(offset+3,1):uint()				-- the length of the embedded TLV
+		bufferLen = bufferLen - len -2
+		offset = offset + 4
+		if type == 1 then -- type Application Context
 			if buffer(offset,1):uint() == 0x06 then	-- type OID
 				len = buffer(offset+1,1):uint()				-- the length of the embedded TLV
 				local oid = PrintOID(buffer(offset+2,7))
 				t_dlms:add(buffer(offset+2,len),"ApplicationContextName:", oid.." ("..ContextVALS[buffer(offset+7,2):uint()]..")")
 				offset = offset + 9
 			end
-			end
-			if bufferLen > 0 then
+		end
+		if bufferLen > 0 then
 			type = GetTagNumber(buffer:range(offset,1))
 			if type == 10 then								-- sender ACSE requirements
 				len = buffer(offset+1,1):uint()
@@ -492,8 +497,8 @@ function dlms_proto.dissector(buffer, pinfo, tree)
 				offset = offset + 2 + len
 				bufferLen = bufferLen - 2 - len
 			end
-			end
-			if bufferLen > 0 then
+		end
+		if bufferLen > 0 then
 			type = GetTagNumber(buffer:range(offset,1))
 			if type == 11 then								-- mechanism name
 				len = buffer(offset+1,1):uint()
@@ -502,76 +507,76 @@ function dlms_proto.dissector(buffer, pinfo, tree)
 				offset = offset + 2 + len
 				bufferLen = bufferLen - 2 - len
 			end
-			end
-			if bufferLen > 0 then
+		end
+		if bufferLen > 0 then
 			type = GetTagNumber(buffer:range(offset,1))
 			if type == 12 then								-- calling authentication value
 				len = buffer(offset+1,1):uint()
 				type = GetTagNumber(buffer:range(offset+2,1)) -- get CHOICE tag
 				if type == 0 then -- charstring
-		offset = offset + 2					-- move to the charstring
-		len = buffer(offset+1,1):uint()	-- the length of the string
+					offset = offset + 2					-- move to the charstring
+					len = buffer(offset+1,1):uint()	-- the length of the string
 				end
 				t_dlms:add(buffer(offset+2,len),"CallingAuthenticationValue:",PrintString(len,buffer(offset+2,len)))
 				offset = offset + 2 + len
 				bufferLen = bufferLen - 2 - len
 			end
-			end
-			if bufferLen > 0 then
+		end
+		if bufferLen > 0 then
 			type = GetTagNumber(buffer:range(offset,1))
 			if type == 30 then									-- type user information 
 				len = buffer(offset+1,1):uint()			-- the length of the embedded TLV
 				if buffer(offset+2,1):uint() == 0x04 then -- type OCTET STRING
-		len = buffer(offset+3,1):uint()				-- the length of the string
-		if buffer(offset+4,1):uint() == 0x01 then -- initiateRequest tag
-			offset = offset+4
-			local t_request = t_dlms:add(buffer(offset,len),"UserInformation:","xDLMS-Initiate.request")
-			local item = buffer(offset+1,1):uint() -- OPTIONAL dedicated-key
-			if item == 0 then -- key not present: boolean value
-				t_request:add(buffer(offset+1,1),"DedicatedKey:",BooleanVALS[item].."("..item..")")
-				offset=offset+2
-			else						-- key present: OCTET STRING
-				offset = offset + 1
-				len = buffer(offset,1)
-				local str = tostring(buffer(offset+1,len))
-				t_request:add(buffer(offset+1,len),"DedicatedKey:",str)
-				offset = offset+1+len
-			end
-			item = buffer(offset,1):uint()
-			t_request:add(buffer(offset,1),"ResponseAllowed:",BooleanVALS[item].."("..item..")")
-			offset = offset+1
-			item = buffer(offset,1):uint()
-			t_request:add(buffer(offset,1),"ProposedQualityOfService:",BooleanVALS[item].."("..item..")")
-			offset = offset+1
-			item = buffer(offset,1):uint()
-			t_request:add(buffer(offset,1),"ProposedDLMSversionNumber:",item)
-			offset = offset+1
-			t_request:add(buffer(offset,7),"ProposedConformance:",tostring(buffer(offset,7)))
-			offset = offset+7
-			t_request:add(buffer(offset,2),"ClientMaxReceivedPDUsize:", buffer(offset,2):uint())
-		end
+					len = buffer(offset+3,1):uint()				-- the length of the string
+					if buffer(offset+4,1):uint() == 0x01 then -- initiateRequest tag
+						offset = offset+4
+						local t_request = t_dlms:add(buffer(offset,len),"UserInformation:","xDLMS-Initiate.request")
+						local item = buffer(offset+1,1):uint() -- OPTIONAL dedicated-key
+						if item == 0 then -- key not present: boolean value
+							t_request:add(buffer(offset+1,1),"DedicatedKey:",BooleanVALS[item].."("..item..")")
+							offset=offset+2
+						else						-- key present: OCTET STRING
+							offset = offset + 1
+							len = buffer(offset,1)
+							local str = tostring(buffer(offset+1,len))
+							t_request:add(buffer(offset+1,len),"DedicatedKey:",str)
+							offset = offset+1+len
+						end
+						item = buffer(offset,1):uint()
+						t_request:add(buffer(offset,1),"ResponseAllowed:",BooleanVALS[item].."("..item..")")
+						offset = offset+1
+						item = buffer(offset,1):uint()
+						t_request:add(buffer(offset,1),"ProposedQualityOfService:",BooleanVALS[item].."("..item..")")
+						offset = offset+1
+						item = buffer(offset,1):uint()
+						t_request:add(buffer(offset,1),"ProposedDLMSversionNumber:",item)
+						offset = offset+1
+						t_request:add(buffer(offset,7),"ProposedConformance:",tostring(buffer(offset,7)))
+						offset = offset+7
+						t_request:add(buffer(offset,2),"ClientMaxReceivedPDUsize:", buffer(offset,2):uint())
+					end
 				end
 			end
-			end
 		end
+	end
 
-		-- processing DLMS.AARE (encoded by BER using TLV structures)
-		if dlms_type == 0x61 then									-- type (application tag AARE)
-			local bufferLen = buffer(offset+1,1):uint()  -- the length of the TLV value
-			t_dlms:add(buffer(offset+1,1),"Length:",bufferLen)
-			local type = GetTagNumber(buffer:range(2,1)) -- type (AARQ field)
-			local len = buffer(offset+3,1):uint()				-- the length of the embedded TLV
-			bufferLen = bufferLen - len -2
-			offset = offset + 4
-			if type == 1 then -- type Application Context
+	-- processing DLMS.AARE (encoded by BER using TLV structures)
+	if dlms_type == 0x61 then									-- type (application tag AARE)
+		local bufferLen = buffer(offset+1,1):uint()  -- the length of the TLV value
+		t_dlms:add(buffer(offset+1,1),"Length:",bufferLen)
+		local type = GetTagNumber(buffer:range(2,1)) -- type (AARQ field)
+		local len = buffer(offset+3,1):uint()				-- the length of the embedded TLV
+		bufferLen = bufferLen - len -2
+		offset = offset + 4
+		if type == 1 then -- type Application Context
 			if buffer(offset,1):uint() == 0x06 then	-- type OID
 				len = buffer(offset+1,1):uint()				-- the length of the embedded TLV
 				local oid = PrintOID(buffer(offset+2,7))
 				t_dlms:add(buffer(offset+2,len),"ApplicationContextName:", oid.." ("..ContextVALS[buffer(offset+7,2):uint()]..")")
 				offset = offset + 9
 			end
-			end
-			if bufferLen > 0 then
+		end
+		if bufferLen > 0 then
 			type = GetTagNumber(buffer:range(offset,1))
 			if type == 2 then								-- association result
 				len = buffer(offset+1,1):uint()
@@ -581,23 +586,23 @@ function dlms_proto.dissector(buffer, pinfo, tree)
 				bufferLen = bufferLen - 2 - len
 				pinfo.cols['info'] = "DLMS "..COSEMpdu[dlms_type]..": "..AssociationResultVALS[result]
 			end
-			end
-			if bufferLen > 0 then
+		end
+		if bufferLen > 0 then
 			type = GetTagNumber(buffer:range(offset,1))
 			if type == 3 then								-- result source diagnostic
 				len = buffer(offset+1,1):uint()
 				type = GetTagNumber(buffer:range(offset+2,1)) 
 				if type == 1 then							-- acse-service user
-		local result = buffer(offset+6,1):uint()
-		t_dlms:add(buffer(offset+6,1),"ResultSourceDiagnostic:",ASCEserviceUserVALS[result].." ("..result..")")
+					local result = buffer(offset+6,1):uint()
+					t_dlms:add(buffer(offset+6,1),"ResultSourceDiagnostic:",ASCEserviceUserVALS[result].." ("..result..")")
 				else
-		t_dlms:add(buffer(offset+6,1),"ResultSourceDiagnostic:",ASCEserviceProvideVALS[result].." ("..result..")")
+					t_dlms:add(buffer(offset+6,1),"ResultSourceDiagnostic:",ASCEserviceProvideVALS[result].." ("..result..")")
 				end
 				offset = offset + 2 + len
 				bufferLen = bufferLen - 2 - len
 			end
-			end
-			if bufferLen > 0 then
+		end
+		if bufferLen > 0 then
 			type = GetTagNumber(buffer:range(offset,1))
 			if type == 8 then								-- responder ACSE requirements
 				len = buffer(offset+1,1):uint()
@@ -606,8 +611,8 @@ function dlms_proto.dissector(buffer, pinfo, tree)
 				offset = offset + 2 + len
 				bufferLen = bufferLen - 2 - len
 			end
-			end
-			if bufferLen > 0 then
+		end
+		if bufferLen > 0 then
 			type = GetTagNumber(buffer:range(offset,1))
 			if type == 9 then								-- mechanism name
 				len = buffer(offset+1,1):uint()
@@ -616,47 +621,47 @@ function dlms_proto.dissector(buffer, pinfo, tree)
 				offset = offset + 2 + len
 				bufferLen = bufferLen - 2 - len
 			end
-			end
-			if bufferLen > 0 then
+		end
+		if bufferLen > 0 then
 			type = GetTagNumber(buffer:range(offset,1))
 			if type == 10 then								-- responding authentication value
 				len = buffer(offset+1,1):uint()
 				type = GetTagNumber(buffer:range(offset+2,1)) -- get CHOICE tag
 				if type == 0 then -- charstring
-		offset = offset + 2					-- move to the charstring
-		len = buffer(offset+1,1):uint()	-- the length of the string
+					offset = offset + 2					-- move to the charstring
+					len = buffer(offset+1,1):uint()	-- the length of the string
 				end
 				t_dlms:add(buffer(offset+2,len),"CallingAuthenticationValue:",PrintString(len,buffer(offset+2,len)))
 				offset = offset + 2 + len
 				bufferLen = bufferLen - 2 - len
 			end
-			end
-			if bufferLen > 0 then
+		end
+		if bufferLen > 0 then
 			type = GetTagNumber(buffer:range(offset,1))
 			if type == 30 then									-- type user information 
 				len = buffer(offset+1,1):uint()			-- the length of the embedded TLV
 				if buffer(offset+2,1):uint() == 0x04 then -- type OCTET STRING
-		len = buffer(offset+3,1):uint()				-- the length of the string
-		if buffer(offset+4,1):uint() == 0x08 then -- initiateResponse tag
-			offset = offset+4
-			local t_request = t_dlms:add(buffer(offset,len),"UserInformation:","xDLMS-Initiate.response")
-			local item = buffer(offset+1,1):uint() -- OPTIONAL negotiated-quality-of-service
-			t_request:add(buffer(offset+1,1),"NegotiatedQualityOfService:",item)
-			offset=offset+2
+					len = buffer(offset+3,1):uint()				-- the length of the string
+					if buffer(offset+4,1):uint() == 0x08 then -- initiateResponse tag
+						offset = offset+4
+						local t_request = t_dlms:add(buffer(offset,len),"UserInformation:","xDLMS-Initiate.response")
+						local item = buffer(offset+1,1):uint() -- OPTIONAL negotiated-quality-of-service
+						t_request:add(buffer(offset+1,1),"NegotiatedQualityOfService:",item)
+						offset=offset+2
 
-			item = buffer(offset,1):uint()
-			t_request:add(buffer(offset,1),"NegotiatedDLMSversion:",item)
-			offset = offset+1
-			t_request:add(buffer(offset,7),"ProposedConformance:",tostring(buffer(offset,7)))
-			offset = offset+7
-			t_request:add(buffer(offset,2),"ClientMaxReceivedPDUsize:", buffer(offset,2):uint())
-			offset = offset+2
-			t_request:add(buffer(offset,2),"VAAname:", buffer(offset,2):uint())
-		end
+						item = buffer(offset,1):uint()
+						t_request:add(buffer(offset,1),"NegotiatedDLMSversion:",item)
+						offset = offset+1
+						t_request:add(buffer(offset,7),"ProposedConformance:",tostring(buffer(offset,7)))
+						offset = offset+7
+						t_request:add(buffer(offset,2),"ClientMaxReceivedPDUsize:", buffer(offset,2):uint())
+						offset = offset+2
+						t_request:add(buffer(offset,2),"VAAname:", buffer(offset,2):uint())
+					end
 				end
 			end
-			end
 		end
+	end
 end
 
 -- returns tag number (last 5 bits of the identifier byte) of the TLV
